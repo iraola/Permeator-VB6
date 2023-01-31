@@ -186,10 +186,10 @@ Private Sub ExtnUnitOperation_Execute(ByVal Forgetting As Boolean)
     Tin = edfInlet.TemperatureValue
     retPressure = edfInlet.PressureValue - edfPressDrop.Value
     permPressDrop = edfInlet.PressureValue - edfPermeate.PressureValue
-    edfRetentate.Temperature.Calculate (Tin)
-    edfPermeate.Temperature.Calculate (Tin)
-    edfRetentate.Pressure.Calculate (retPressure)
-    edfPermPressDrop.Calculate (permPressDrop)
+    Call edfRetentate.Temperature.Calculate(Tin)
+    Call edfPermeate.Temperature.Calculate(Tin)
+    Call edfRetentate.Pressure.Calculate(retPressure)
+    Call edfPermPressDrop.Calculate(permPressDrop)
 
     ' Step 7 - Final Balance, checks and EDF visualization
     ' Now use the .Balance method of the container object to make Hysys perform a Balance
@@ -494,11 +494,11 @@ Private Function Permeation()
     ' Setup Permeabilities - calculate them and write in EDF (read-only)
     Dim P() As Double
     ReDim P(nPermAtom - 1)
-    ' We calculate Input units as (kmol · m-1 · s -1 · Pa-0.5), therefore the division by 1000
+    ' We calculate Input units as (kmol ï¿½ m-1 ï¿½ s -1 ï¿½ Pa-0.5), therefore the division by 1000
     For i = 0 To nPermAtom - 1
         P(i) = A(i) * Math.Exp(E(i) / (R * TfeedK)) / 1000  ' A() comes in mol, not kmol
     Next
-    ' Publish permeabilities in mol · ...
+    ' Publish permeabilities in mol ï¿½ ...
     Call edfPH.SetValue(P(0) * 1000)
     Call edfPD.SetValue(P(1) * 1000)
     Call edfPT.SetValue(P(2) * 1000)
@@ -1101,44 +1101,29 @@ End Function
 
 
 
-'-----------------------------------------------------------------------'
-'                      Dynamics Methods                                 '
-'-----------------------------------------------------------------------'
-
+'***************************************************************************'
+'                           Dynamic Methods                                 '
+'***************************************************************************'
 Public Sub DynInitialize(dContainer As ExtnDynUnitOpContainer, IsRecalling As Boolean, MyVersion As Long, HoldupExist As Boolean)
-' Called to Initialize the extension.
+    ' Called to Initialize the extension.
     Set dynContainer = dContainer
     HoldupExist = False
-    'Quant es necessari
-    MyVersion = extnCurrentVersion
+    MyVersion = CurrentExtensionVersion_enum.extnCurrentVersion
 End Sub
 
 
 Public Function InitializeSystem(ForceInit As Boolean) As Boolean
-' Called each time the integration starts
-    Dim i As Long
+    ' Called each time the integration starts
     InitializeSystem = False
-    'ErrorStatus = False
-    
-    If (edfInlet Is Nothing Or edfPermeate Is Nothing Or edfRetentate Is Nothing) Then Exit Function
-    
-    ' ProccesStreams list
-    ReDim Preserve StreamList(0 To 2)
-    Set StreamList(0) = edfInlet
-    Set StreamList(1) = edfRetentate
-    Set StreamList(2) = edfPermeate
-    ' La StreamList apunta directamente a las variables Attachment del EDF,
-    ' si se modifican los streams, tambiï¿½n se ve reflejado en StreamList
-    If Not edfPermIn Is Nothing Then
-        ReDim Preserve StreamList(0 To 3)
-        Set StreamList(3) = edfPermIn
+    nComp = UBound(edfInlet.ComponentMolarFlowValue) + 1
+    'edfPermPressDrop.SetModifyState(VariableStatus_enum.vsSpecifiedOutside) TODO
+    'edfPressDrop.SetModifyState(VariableStatus_enum.vsCalculated) TODO
+    ' Check existing streams
+    If (edfInlet Is Nothing Or edfPermeate Is Nothing Or edfRetentate Is Nothing) Then
+        Exit Function
     End If
-    ' Fluid list
-    ReDim Preserve fluidList(0 To UBound(StreamList))
-    For i = 0 To UBound(StreamList)
-        Set fluidList(i) = StreamList(i).DuplicateFluid
-    Next i
-    
+    ' Set up StreamList() and FluidList - will directly point to ProcessStreams
+    Call BuildStreamsAndFluids
     InitializeSystem = True
 End Function
 
@@ -1200,15 +1185,17 @@ Public Function PressureBalanceEquationVars(EquationIdx As Long)
     Else
         Select Case EquationIdx
             Case 0 'No Perm Side
+                ReDim P(1)
                 Set P(0) = edfInlet.Pressure
                 Set P(1) = edfRetentate.Pressure
             Case 1 'Perm Side
+                ReDim P(1)
                 Set P(0) = edfPermIn.Pressure
                 Set P(1) = edfPermeate.Pressure
         End Select
     End If
     
-        PressureBalanceEquationVars = P
+    PressureBalanceEquationVars = P
 End Function
 
 Public Function PressureBalanceEquationCoef(EquationIdx As Long)
@@ -1245,7 +1232,7 @@ Public Function VariablesInFlowBalanceEquations()
         NVars(0) = 1    ' Perm Flow
         NVars(1) = 3
     Else
-        MsgBox "FlowBalanceEqs are not programmed for Permeated Inlet"
+        Call MsgBox("FlowBalanceEqs are not programmed for Permeated Inlet")
         Exit Function
     End If
 
@@ -1337,17 +1324,17 @@ End Function
 
 Public Function VariablesInGeneralEquations()
 ' Called to get the number of variables in different General equations extension contributes separately.
-    Dim NVars(1) As Long
-    NVars(0) = 2
-    VariablesInGeneralEquations = NVars
+    'Dim NVars(1) As Long
+    'NVars(0) = 2
+    'VariablesInGeneralEquations = NVars
 End Function
 
 Public Function GeneralEquationVars(EquationIdx As Long)
 ' Called to get the variables in each General equation.
-    Dim GV(1) As RealVariable
-    Set GV(0) = edfInlet.MolarFlow
-    Set GV(1) = edfRetentate.MolarFlow
-    GeneralEquationVars = GV
+   'Dim GV(1) As RealVariable
+    'Set GV(0) = edfInlet.MolarFlow
+    'Set GV(1) = edfRetentate.MolarFlow
+    'GeneralEquationVars = GV
 End Function
 
 Public Sub PrepareToIterateOnGeneralEqns(Dtime As Double)
@@ -1397,55 +1384,82 @@ Public Function PreProcessStates(Dtime As Double) As Boolean
     'PermeationT = 0 ' TODO: UPDATE!!
     'PermeationH = 0
     'dynContainer.UpdateFlowBalanceEquationCoef 0, 1, (PermeationT + PermeationH)
-    If Not edfLen.IsKnown Or Not edfDiam.IsKnown Or Not edfThick.IsKnown Or Not edfk.IsKnown Or Not edfAperm.IsKnown Or Not edfNtubes.IsKnown Then
-        PreProcessStates = False
-    Else
-        PreProcessStates = True
-    End If
+    PreProcessStates = CheckExtnRequirements()
 End Function
 
 Public Function PostProcessStates(Dtime As Double) As Boolean
-' Called at each step of the integration just after Pressure Flow Solver finishes solving the set of equations.
-'Updates P-F data
-   PostProcessStates = True
+    ' Called at each step of the integration just after Pressure Flow Solver finishes solving the set of equations.
+    'Updates P-F data
+
+
+    ' Step 5 - Set the calculated values to the list of fluids and product streams
+    'SetPermeationFlows(StreamList, GlobalPermComponentMolarFlow) 'TODO
+
+    '' Step 6 - Pressure drop and flash specifications
+    Dim Tin As Double, retPressure As Double, permPressDrop As Double
+    'Tin = edfInlet.TemperatureValue
+    'retPressure = edfInlet.PressureValue - edfPressDrop.Value
+    'permPressDrop = edfInlet.PressureValue - edfPermeate.PressureValue
+    'Call edfRetentate.Temperature.Calculate(Tin) ' TODO: move to StepEnergy?
+    'Call edfPermeate.Temperature.Calculate(Tin)  ' TODO: move to StepEnergy?
+    'Call edfRetentate.Pressure.Calculate(retPressure)
+    'Call edfPermPressDrop.Calculate(permPressDrop)
+
+    ' ProductStream list
+    Dim ProductStreams(1)
+    'ReDim Preserve ProductStreams(0 To 1)
+    ProductStreams(0) = edfRetentate
+    ProductStreams(1) = edfPermeate
+    'Call dynContainer.UpdateFluidsOfStreams(ProductStreams)          ' TODO: use only products - apparently yes 'TODO: not working currently
+    'Call dynContainer.GetStreamsPropertiesFromFluids(ProductStreams)
+    PostProcessStates = True
 End Function
 
 Public Function StepEnergyExplicitly(Dtime As Double) As Boolean
 ' Called to do the energy integration on the extension. PERFORM FLASH
     Dim i As Long
     ' Save Streams into a vector of fluids
+    ' Need to repeat every step to make sure is the duplicates of StreamList
     ReDim Preserve fluidList(0 To UBound(StreamList))
     For i = 0 To UBound(StreamList)
         Set fluidList(i) = StreamList(i).DuplicateFluid
     Next i
     ' Store values in double VB variables for flash
-    Dim Pperm As Double, Pout As Double, Tin As RealVariable
-    Tin = edfInlet.Temperature
-    Pperm = edfPermeate.PressureValue
-    Pout = edfRetentate.PressureValue
+    Dim flashRet As FlashStatus_enum, flashPerm As FlashStatus_enum
+    Dim retPressure As Double, permPressDrop As Double, Tin As RealVariable
+    Set Tin = edfInlet.Temperature
+    retPressure = edfInlet.PressureValue - edfPressDrop.Value
+    permPressDrop = edfInlet.PressureValue - edfPermeate.PressureValue
+    Call edfPermPressDrop.SetValue(permPressDrop)
     ' Perform Flash
-    Dim flashPerm As Boolean, flashNoPerm As Boolean
-    flashPerm = fluidList(2).TPFlash(Tin, Pperm)
-    flashNoPerm = fluidList(1).TPFlash(Tin, Pout)
+    flashRet = fluidList(1).TPFlash(Tin, retPressure)
+    flashPerm = fluidList(2).TPFlash(Tin, edfPermeate.Pressure)
+    If flashRet > 0 Then
+        Call myContainer.Trace(myContainer.Name & ": Retentate flash failed", False)
+    End If
+    If flashPerm > 0 Then
+        Call myContainer.Trace(myContainer.Name & ": Permeate flash failed", False)
+    End If
     ' Transfer fluid to actual streams
-    dynContainer.UpdateStreamFluidFromFluid edfPermeate, fluidList(2), True
-    dynContainer.UpdateStreamFluidFromFluid edfRetentate, fluidList(1), True     'Updates
-    
+    ' Use False argument: dont need to make this method perform flash again
+    Call dynContainer.UpdateStreamFluidFromFluid(edfPermeate, fluidList(2), False)
+    Call dynContainer.UpdateStreamFluidFromFluid(edfRetentate, fluidList(1), False)     'Updates
     StepEnergyExplicitly = True
 End Function
 
 Public Function StepCompositionExplicitly(Dtime As Double) As Boolean
   On Error GoTo errorHandler
     ' Distribute flows per component
-    'fluidList = SetPermeationFluids(fluidList, 0, 0) ' TODO!!
+    'SetPermeationFluids(fluidList, GlobalPermComponentMolarFlow) TODO
     ' Transfer fluid to actual streams
-    dynContainer.UpdateStreamFluidFromFluid edfPermeate, fluidList(2), True
-    dynContainer.UpdateStreamFluidFromFluid edfRetentate, fluidList(1), True
+    Call dynContainer.UpdateStreamFluidFromFluid(edfPermeate, fluidList(2), True)
+    Call dynContainer.UpdateStreamFluidFromFluid(edfRetentate, fluidList(1), True)
     ' Visualization functions
-    'Call Composition(fluidList)
-    'Call Condition(fluidList)
+    'Composition(fluidList)
+    'Condition(fluidList)
     StepCompositionExplicitly = True
     Exit Function
 errorHandler:
-    Call MsgBox(myContainer.Name + "error")
+    sMsg = "Error #" & Err.Number & ": '" & Err.Description & "' from '" & Err.Source & "'"
+    Call MsgBox(myContainer.Name + " - StepComposition: " + sMsg)
 End Function
