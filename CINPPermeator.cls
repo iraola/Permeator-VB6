@@ -444,21 +444,22 @@ End Sub
 '                         Permeation Functions                              '
 '***************************************************************************'
 Private Function Permeation()
-    ' Calculate vector of permeated species in default HYSYS magnitude: "kmol/s"
-    '   Ffeed:          Double(nComp)   inlet molar flow (per component)
-    '   Fperm:          Double(nComp)   permeated molar flow in one cell (per component)
-    '   FpermTotal:     Double(nComp)   aggregates molar flow permeated for each cell
-    '                                   (per component)
-    '   Fcell:          Double(nComp)   similar to "Ffeed" but for each cell calculated from
-    '                                   previous cell
-    '   FpermCells:     Double(Npoints) collect total permeation in each cell for plotting purposes
-    '   FpermAtom:      Double(3)       Output of the diffusion part of code (H, D, T mole flows)
-    '   FpermMolec:      Double(nComp)   Output of the function. Permeated flow (per component)
-    '   PfeedPermAtom:  Double(3)       Partial pressure of a specific atom contributed by
-    '                                   various molecules for the diffusion
-    '   X:              Double(3)       Fraction variable to take into account contribution of
-    '                                   each atom to the inlet permeation pressure
-
+' Calculate vector of permeated species in default HYSYS magnitude: "kmol/s"
+'   Ffeed:          Double(nComp)   inlet molar flow (per component)
+'   Fperm:          Double(nComp)   permeated molar flow in one cell (per component)
+'   FpermTotal:     Double(nComp)   aggregates molar flow permeated for each cell
+'                                   (per component)
+'   Fcell:          Double(nComp)   similar to "Ffeed" but for each cell calculated from
+'                                   previous cell
+'   FpermCells:     Double(Npoints) collect total permeation in each cell for plotting purposes
+'   FpermAtom:      Double(3)       Output of the diffusion part of code (H, D, T mole flows)
+'   FpermMolec:      Double(nComp)   Output of the function. Permeated flow (per component)
+'   PfeedPermAtom:  Double(3)       Partial pressure of a specific atom contributed by
+'                                   various molecules for the diffusion
+'   X:              Double(3)       Fraction variable to take into account contribution of
+'                                   each atom to the inlet permeation pressure
+  On Error GoTo errorHandler
+  
     ' Step 1 - Declarations
     Dim Fperm() As Double, FpermMolec() As Double, Ffeed() As Double, Fcell() As Double
     Dim FpermAtom() As Double, X() As Double, PfeedPermAtom() As Double
@@ -588,6 +589,11 @@ Private Function Permeation()
     'Next i
 
     Permeation = FpermMolec
+    Exit Function
+errorHandler:
+    Dim sMsg As String
+    sMsg = "Error #" & Err.Number & ": '" & Err.Description & "' from '" & Err.Source & "'"
+    Call MsgBox(myContainer.Name + " - Permeation: " + sMsg)
 End Function
 
 Private Sub PermeateHeuristic1(FpermMolec() As Double, Ffeed() As Double, FpermAtom() As Double)
@@ -1116,8 +1122,10 @@ Public Function InitializeSystem(ForceInit As Boolean) As Boolean
     ' Called each time the integration starts
     InitializeSystem = False
     nComp = UBound(edfInlet.ComponentMolarFlowValue) + 1
-    'edfPermPressDrop.SetModifyState(VariableStatus_enum.vsSpecifiedOutside) TODO
-    'edfPressDrop.SetModifyState(VariableStatus_enum.vsCalculated) TODO
+    ' Set pressure modifiable status
+    '  Would prefer it to be "calculated" but throws an error when using .Calculated
+    Call edfPermPressDrop.SetModifyState(VariableStatus_enum.vsSpecifiedOutside)
+    Call edfPressDrop.SetModifyState(VariableStatus_enum.vsCalculated)
     ' Check existing streams
     If (edfInlet Is Nothing Or edfPermeate Is Nothing Or edfRetentate Is Nothing) Then
         Exit Function
@@ -1264,13 +1272,9 @@ Public Function FlowBalanceEquationCoef(EquationIdx As Long)
     Select Case EquationIdx
         Case 0 ' Permeation balance
             ReDim Coef(1)
-            Dim aux() As Double
-            ReDim aux(nComp - 1)
-            ' Calculate first perm value
-            aux = Permeation()
-            ' Define coefs
+            GlobalPermComponentMolarFlow = Permeation()
             Coef(0) = 1    'Permflow
-            Coef(1) = 0     'Constant TODO: CHANGE THIS TO THE OUTPUT OF PERMEATION !!!!!!!!!!!
+            Coef(1) = Sum(GlobalPermComponentMolarFlow)  'Constant
         Case 1 ' Normal balance
             ReDim Coef(3)
             Coef(0) = 1
@@ -1377,26 +1381,29 @@ End Sub
 
 Public Function PreProcessStates(Dtime As Double) As Boolean
 ' Called at each step of the integration just before Pressure Flow Solver starts to solve the set of equations.
-    Dim aux() As Double
-    ReDim aux(nComp - 1)
-    aux = Permeation()
-    ' Save in PermeationT, PermeationH, so it will be used in StepEnergyExplicitly( )
-    'PermeationT = 0 ' TODO: UPDATE!!
-    'PermeationH = 0
-    'dynContainer.UpdateFlowBalanceEquationCoef 0, 1, (PermeationT + PermeationH)
+  On Error GoTo errorHandler
+    ' Update permeation: set value it to edfTotalPermMolFlow so it updates FlowBalance coeffs
+    GlobalPermComponentMolarFlow = Permeation()
+    Call dynContainer.UpdateFlowBalanceEquationCoef(0, 1, Sum(GlobalPermComponentMolarFlow))
     PreProcessStates = CheckExtnRequirements()
+    Exit Function
+errorHandler:
+    Dim sMsg As String
+    sMsg = "Error #" & Err.Number & ": '" & Err.Description & "' from '" & Err.Source & "'"
+    Call MsgBox(myContainer.Name + " - PreProcessStates: " + sMsg)
 End Function
 
 Public Function PostProcessStates(Dtime As Double) As Boolean
-    ' Called at each step of the integration just after Pressure Flow Solver finishes solving the set of equations.
+' Called at each step of the integration just after Pressure Flow Solver finishes solving the set of equations.
+  On Error GoTo errorHandler
     'Updates P-F data
 
 
     ' Step 5 - Set the calculated values to the list of fluids and product streams
     'SetPermeationFlows(StreamList, GlobalPermComponentMolarFlow) 'TODO
 
-    '' Step 6 - Pressure drop and flash specifications
-    Dim Tin As Double, retPressure As Double, permPressDrop As Double
+    ' Step 6 - Pressure drop and flash specifications
+    'Dim Tin As Double, retPressure As Double, permPressDrop As Double
     'Tin = edfInlet.TemperatureValue
     'retPressure = edfInlet.PressureValue - edfPressDrop.Value
     'permPressDrop = edfInlet.PressureValue - edfPermeate.PressureValue
@@ -1413,10 +1420,16 @@ Public Function PostProcessStates(Dtime As Double) As Boolean
     'Call dynContainer.UpdateFluidsOfStreams(ProductStreams)          ' TODO: use only products - apparently yes 'TODO: not working currently
     'Call dynContainer.GetStreamsPropertiesFromFluids(ProductStreams)
     PostProcessStates = True
+    Exit Function
+errorHandler:
+    Dim sMsg As String
+    sMsg = "Error #" & Err.Number & ": '" & Err.Description & "' from '" & Err.Source & "'"
+    Call MsgBox(myContainer.Name + " - PostProcessStates: " + sMsg)
 End Function
 
 Public Function StepEnergyExplicitly(Dtime As Double) As Boolean
 ' Called to do the energy integration on the extension. PERFORM FLASH
+  On Error GoTo errorHandler
     Dim i As Long
     ' Save Streams into a vector of fluids
     ' Need to repeat every step to make sure is the duplicates of StreamList
@@ -1445,12 +1458,17 @@ Public Function StepEnergyExplicitly(Dtime As Double) As Boolean
     Call dynContainer.UpdateStreamFluidFromFluid(edfPermeate, fluidList(2), False)
     Call dynContainer.UpdateStreamFluidFromFluid(edfRetentate, fluidList(1), False)     'Updates
     StepEnergyExplicitly = True
+    Exit Function
+errorHandler:
+    Dim sMsg As String
+    sMsg = "Error #" & Err.Number & ": '" & Err.Description & "' from '" & Err.Source & "'"
+    Call MsgBox(myContainer.Name + " - StepEnergy: " + sMsg)
 End Function
 
 Public Function StepCompositionExplicitly(Dtime As Double) As Boolean
   On Error GoTo errorHandler
     ' Distribute flows per component
-    'SetPermeationFluids(fluidList, GlobalPermComponentMolarFlow) TODO
+    Call SetPermeationFluids(fluidList, GlobalPermComponentMolarFlow)
     ' Transfer fluid to actual streams
     Call dynContainer.UpdateStreamFluidFromFluid(edfPermeate, fluidList(2), True)
     Call dynContainer.UpdateStreamFluidFromFluid(edfRetentate, fluidList(1), True)
@@ -1460,6 +1478,7 @@ Public Function StepCompositionExplicitly(Dtime As Double) As Boolean
     StepCompositionExplicitly = True
     Exit Function
 errorHandler:
+    Dim sMsg As String
     sMsg = "Error #" & Err.Number & ": '" & Err.Description & "' from '" & Err.Source & "'"
     Call MsgBox(myContainer.Name + " - StepComposition: " + sMsg)
 End Function
