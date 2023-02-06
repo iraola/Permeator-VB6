@@ -508,11 +508,11 @@ Private Function Permeation()
     ' Setup Permeabilities - calculate them and write in EDF (read-only)
     Dim P() As Double
     ReDim P(nPermAtom - 1)
-    ' We calculate Input units as (kmol · m-1 · s -1 · Pa-0.5), therefore the division by 1000
+    ' We calculate Input units as (kmol ï¿½ m-1 ï¿½ s -1 ï¿½ Pa-0.5), therefore the division by 1000
     For i = 0 To nPermAtom - 1
         P(i) = A(i) * Math.Exp(E(i) / (R * TfeedK)) / 1000  ' A() comes in mol, not kmol
     Next
-    ' Publish permeabilities in mol · ...
+    ' Publish permeabilities in mol ï¿½ ...
     Call edfPH.SetValue(P(0) * 1000)
     Call edfPD.SetValue(P(1) * 1000)
     Call edfPT.SetValue(P(2) * 1000)
@@ -846,7 +846,7 @@ Private Sub SetPermeationFluids(fluids() As fluid, permMolarFlows() As Double)
     Dim flagRet As Boolean, flagPerm As Boolean
     ' Calculate retentate component flows
     inletMolarFlows = fluids(0).MolarFlowsValue
-    retMolarFlows = Subtract(inletMolarFlows, permMolarFlows)
+    retMolarFlows = SubtractVectorsIf(inletMolarFlows, permMolarFlows)
     ' Set the fictitious molar flow vectors to the actual ones
     flagRet = SetValueComponentMolarFlowFluid(fluids(1), retMolarFlows)     ' Retentate
     flagPerm = SetValueComponentMolarFlowFluid(fluids(2), permMolarFlows)   ' Permeate
