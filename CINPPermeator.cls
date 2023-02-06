@@ -37,6 +37,7 @@ Option Explicit
     Dim myPlotH As TwoDimensionalPlot
     Dim myPlotNameT As InternalTextVariable
     Dim myPlotT As TwoDimensionalPlot
+    Dim GrafL As Variant
 
     '***************************************************************************'
     '                            EDF Variables                                  '
@@ -66,8 +67,8 @@ Option Explicit
     Private edfPressDrop As InternalRealVariable
     Private edfPermPressDrop As InternalRealVariable
     'Private edfDiamExt As InternalRealVariable
-    'Private edfLengthPos As InternalRealFlexVariable
-    'Private edfCompT As InternalRealFlexVariable
+    Private edfLengthPos As InternalRealFlexVariable
+    Private edfCompT As InternalRealFlexVariable
     'Private edfCompH As InternalRealFlexVariable
     Private edfNpoints As InternalRealVariable
 
@@ -83,6 +84,7 @@ Option Explicit
     Dim StreamList() As ProcessStream
     ' Permeation flow
     Dim GlobalPermComponentMolarFlow() As Double
+    Dim FpermCellsPlot() As Double
 
     ' Constants
     Private Const pi As Double = 3.14159265359
@@ -106,7 +108,6 @@ Private Function ExtnUnitOperation_Initialize(ByVal Container As HYSYS.ExtnUnitO
     ' Recall check
     If Not IsRecalling Then
         'Step 3 - set the NumberOfPoints variable to 0.
-        'NumberOfPoints.Value = 0
     Else
         ' Visibility controllers
         ' I PREFER TO SEE THE LAST USED VIEW INSTEAD OF THE MAIN ONE
@@ -142,7 +143,21 @@ Private Function ExtnUnitOperation_Initialize(ByVal Container As HYSYS.ExtnUnitO
     Area = pi * (Din ^ 2) / 4
     L = edfLen.GetValue() * edfNtubes.GetValue()
     Volume = L * Area
-    ' Call CreatePlot
+    ' Plotting initializations
+    If edfLengthPos Is Nothing Or edfCompT Is Nothing Then
+        Dim auxZeros() As Double
+        If edfNpoints Is Nothing Or edfNpoints.Value = -32767 Then
+            ReDim auxZeros(0)
+        Else
+            ReDim auxZeros(edfNpoints.Value - 1)
+        End If
+        Call edfLengthPos.SetValues(auxZeros)
+        Call edfCompT.SetValues(auxZeros)
+    End If
+    Call CreatePlot
+    If Not edfLen Is Nothing And Not edfNpoints Is Nothing And edfNpoints.Value <> -32767 Then
+        GrafL = LengthVector(edfLen.Value, edfNpoints.Value)
+    End If
     ' Loop for setting index for components of interest (based on Inlet's basis manager)
     Call IniCompIndex
     ' Return Initialize
@@ -259,13 +274,13 @@ Private Sub ExtensionObject_VariableChanged(ByVal Variable As HYSYS.InternalVari
             Set edfRetentate = myContainer.FindVariable("Retentate").Variable.object
         Case "PermIn"
             Set edfPermIn = myContainer.FindVariable("PermIn").Variable.object
-        Case "ActualizePlot"
-            'edfCompT.SetBounds(edfNpoints.Value + 1)
-            'edfCompH.SetBounds(edfNpoints.Value + 1)
-            'edfLengthPos.SetBounds(edfNpoints.Value + 1)
-            'edfLengthPos.Values = GrafL
-            'edfCompT.Values = FpermCells
-            'edfCompH.Values = FpermCells
+        Case "UpdatePlot"
+            Call edfCompT.SetBounds(edfNpoints.Value)
+            Call edfLengthPos.SetBounds(edfNpoints.Value)
+            edfLengthPos.Values = GrafL
+            edfCompT.Values = FpermCellsPlot
+            'Call edfCompH.SetBounds(edfNpoints.Value + 1)
+            'edfCompH.Values = FpermCellsPlot
 
         '%% Geometry variables
         Case "Length"
@@ -274,7 +289,7 @@ Private Sub ExtensionObject_VariableChanged(ByVal Variable As HYSYS.InternalVari
             ' Recalculation of cross-area and total volume
             Area = pi * (Din ^ 2) / 4
             Volume = L * Area
-            '''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''' GrafL = LengthVector(edfLen, edfNpoints)
+            GrafL = LengthVector(edfLen.Value, edfNpoints.Value)
             ' Recalculation of total permeation surface
             Ravg = ((Din + (Din + 2 * thick)) / 2) / 2      ' auxiliar average radius between Dint and Dext
             Call edfAperm.SetValue(L * (2 * pi * Ravg))
@@ -327,7 +342,7 @@ Private Sub ExtensionObject_VariableChanged(ByVal Variable As HYSYS.InternalVari
             Set edfk = myContainer.FindVariable("k").Variable
         Case "NumberOfPoints"
             Set edfNpoints = myContainer.FindVariable("NumberOfPoints").Variable
-            'GrafL = LengthVector(edfLen, edfNpoints)
+            GrafL = LengthVector(edfLen.Value, edfNpoints.Value)
 
     End Select
     Exit Sub
@@ -362,7 +377,6 @@ Private Sub ExtensionObject_Terminate()
     Set edfPermeate = Nothing
     Set edfRetentate = Nothing
     Set edfPermIn = Nothing
-    'Set NumberOfPoints = Nothing
     Call myContainer.DeletePlot("PQPlot")
     'Set myPlot = Nothing
     'Set myPlotName = Nothing
@@ -387,8 +401,8 @@ Private Sub ExtensionObject_Terminate()
     'Set edfMassFlow = Nothing
     Set edfPressDrop = Nothing
     Set edfPermPressDrop = Nothing
-    'Set edfLengthPos = Nothing
-    'Set edfCompT = Nothing
+    Set edfLengthPos = Nothing
+    Set edfCompT = Nothing
     'Set edfCompH = Nothing
     Set edfNpoints = Nothing
     Set myPlotH = Nothing
@@ -404,7 +418,6 @@ Private Sub pointedEDFVariables()
         Set edfRetentate = .FindVariable("Retentate").Variable.object
         Set edfPermeate = .FindVariable("Permeate").Variable.object
         Set edfPermIn = .FindVariable("PermIn").Variable.object
-        'Set NumberOfPoints = .FindVariable("NumberOfPoints").Variable
         'Set myPlotName = .FindVariable("PlotName").Variable
         Set edfThick = .FindVariable("Thickness").Variable
         Set edfLen = .FindVariable("Length").Variable
@@ -426,8 +439,8 @@ Private Sub pointedEDFVariables()
         'Set edfMassFlow = .FindVariable("StreamMassFlow").Variable
         Set edfPermPressDrop = .FindVariable("PermPressDrop").Variable
         Set edfPressDrop = .FindVariable("PressDrop").Variable
-        'Set edfLengthPos = .FindVariable("LengthPos").Variable
-        'Set edfCompT = .FindVariable("CompT").Variable
+        Set edfLengthPos = .FindVariable("LengthPos").Variable
+        Set edfCompT = .FindVariable("CompT").Variable
         'Set edfCompH = .FindVariable("CompH").Variable
         Set edfNpoints = .FindVariable("NumberOfPoints").Variable
         Set myPlotNameH = .FindVariable("PlotNameH").Variable
@@ -452,8 +465,8 @@ Private Function Permeation()
     '                                   (per component)
     '   Fcell:          Double(nComp)   similar to "Ffeed" but for each cell calculated from
     '                                   previous cell
-    '   FpermCells:     Double(Npoints) collect total permeation in each cell for plotting
-    '                                   purposes. TODO
+    '   FpermCellsPlot: Double(Npoints) collect total permeation in each cell for plotting
+    '                                   purposes.
     '   CellFpermAtom:  Double(3)       Cell output of the diffusion part of code (H, D, T mole
     '                                   flows)
     '   CellFpermMolec  Double(nComp)   Cell permeate component molar flow
@@ -487,11 +500,11 @@ Private Function Permeation()
     PfeedPa = edfInlet.Pressure.GetValue("N/m2")    ' Pascals to match permeability formula
     TfeedK = edfInlet.Temperature.GetValue("K")     ' K degrees to match permeability formula
     Qfeed = edfInlet.ActualVolumeFlowValue
-    Ffeed = edfInlet.ComponentMolarFlowValue         ' molar flow per component
+    Ffeed = edfInlet.ComponentMolarFlowValue        ' molar flow per component
     ' Cell discretization initializations
     nCell = edfNpoints.GetValue()
-    ' ReDim FpermCells(nCell - 1) TODO
     ApermCell = Aperm / nCell                       ' permeation surface per differential cell
+    ReDim FpermCellsPlot(nCell - 1)
     ' Setup Permeabilities - calculate them and write in EDF (read-only)
     Dim P() As Double
     ReDim P(nPermAtom - 1)
@@ -573,6 +586,7 @@ Private Function Permeation()
 
         ' Step 7 - Calculate cell retentate and accumulate permeation flow
         FpermMolec = SumArrays(FpermMolec, CellFpermMolec)
+        FpermCellsPlot(iCell) = Sum(FpermMolec)
         ' Current cell Retentate will be the next cell Feed
         cellFfeedMolec = Subtract(cellFfeedMolec, CellFpermMolec)
         ' Calculate molar fractions off this new retentate
@@ -1079,7 +1093,7 @@ End Function
 '      Condition = True
 ' End Function
 '
-' Sub CreatePlot()
+Sub CreatePlot()
 '     If Not myPlotH Is Nothing Then
 '         myContainer.DeletePlot "LCPlotH"
 '         Set myPlotH = Nothing
@@ -1101,28 +1115,25 @@ End Function
 '         .SetDataSetYData 1, edfCompH
 '         .SetDataSetColour 1, "Red"
 '     End With
-'     If Not myPlotT Is Nothing Then
-'         myContainer.DeletePlot "LCPlotT"
-'         Set myPlotT = Nothing
-'     End If
-'     myContainer.BuildPlot2 "LCPlotT", myPlotT, hptTwoDimensionalPlot
-'     myPlotNameT.Value = "LCPlotT"
-'     With myPlotT
-'         .TitleData = "Length vs Permeation"
-'
-'         .SetAxisLabelData hatXAxis, "Length (m)"
-'         .SetAxisLabelData hatYAxis, "Perm Flow"
-'         .SetAxisLabelVisible hatXAxis, True
-'         .SetAxisLabelVisible hatYAxis, True
-'
-'         .LegendVisible = True
-'
-'         .CreateXYDataSet 1, "PQData"
-'         .SetDataSetXData 1, edfLengthPos
-'         .SetDataSetYData 1, edfCompT
-'         .SetDataSetColour 1, "Red"
-'     End With
-' End Sub
+    If Not myPlotT Is Nothing Then
+        Call myContainer.DeletePlot("LCPlotT")
+        Set myPlotT = Nothing
+    End If
+    Call myContainer.BuildPlot2("LCPlotT", myPlotT, hptTwoDimensionalPlot)
+    myPlotNameT.Value = "LCPlotT"
+    With myPlotT
+        .TitleData = "Length vs Permeation"
+        .SetAxisLabelData hatXAxis, "Length (m)"
+        .SetAxisLabelData hatYAxis, "Perm Flow"
+        .SetAxisLabelVisible hatXAxis, True
+        .SetAxisLabelVisible hatYAxis, True
+        .LegendVisible = True
+        .CreateXYDataSet 1, "PQData"
+        .SetDataSetXData 1, edfLengthPos
+        .SetDataSetYData 1, edfCompT
+        .SetDataSetColour 1, "Red"
+    End With
+End Sub
 
 
 

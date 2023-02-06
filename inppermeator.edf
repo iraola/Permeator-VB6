@@ -52,7 +52,7 @@ ExtensionVariables EV
    TextVar "PlotNameT" "PlotNameT" 0 Persistent NoTriggerSolve
    TextVar "PlotNameH" "PlotNameH" 0 Persistent NoTriggerSolve
    RealVar "DiamExtern" "DiamExtern" "Length" 0 Persistent TriggerSolve
-   Message "ActualizePlot" "ActualizePlot" NoTriggerSolve
+   Message "UpdatePlot" "UpdatePlot" NoTriggerSolve
    RealVar "molDensity" "molDensity" "MolarDensity" 0 Persistent TriggerSolve
    RealVar "k" "k" "User" 0 Persistent TriggerSolve
    RealVar "Aperm" "Aperm" "Area" 0 Persistent TriggerSolve
@@ -562,13 +562,13 @@ RadioButtons LCData
    TargetViewable PlotVisControl
    SourceViewMgr PageController 4
    SourceViewMgr Performance 2
-   Button 0.000000 150 8 90 "Length vs NonPerm Flow" TextRight
-   Button 1.000000 230 8 72 "Length vs Perm Flow" TextRight
+   Button 0.000000 150 8 90 "Length vs Perm Flow" TextRight
+   Button 1.000000 230 8 72 "Length vs NonPerm Flow" TextRight
 end
 
 SubViewMgr PlotVisControl
-   State "Length vs CompH" 0.000000 0.000000 ":"
    State "Length vs CompT" 1.000000 1.000000 ":"
+   State "Length vs CompH" 0.000000 0.000000 ":"
 end
 
 PlotWidget PlotWidget1
@@ -625,11 +625,11 @@ end
 
 Button Button1
    Area 86 6 51 14
-   Label "RefreshPlot"
+   Label "Refresh Plot"
    SourceViewMgr PageController 4
    SourceViewMgr PlotVisControl 3
    SourceViewMgr Performance 3
-   Message ":ExtraData.0.0(ActualizePlot)"
+   Message ":ExtraData.0.0(UpdatePlot)"
 end
 
 NumericMatrixInfo PH
@@ -666,12 +666,12 @@ end
 
 NumericMatrixInfo MatrixDataSet2
    Moniker ":ExtraData.0.0.[](CompT)"
-   Label "NonPermeation Flow [kmol/s]"
+   Label "Permeation Flow"
 end
 
 NumericMatrixInfo MatrixDataSet4
    Moniker ":ExtraData.0.0.[](CompH)"
-   Label "Permeation Flow [kmol/s]"
+   Label "Non Permeation Flow"
 end
 
 RichTextEntry RichTextEntry1
