@@ -224,7 +224,7 @@ Private Sub ExtensionObject_StatusQuery(ByVal Status As HYSYS.ObjectStatus)
     If edfRetentate Is Nothing Then
         Call Status.AddStatusCondition(slMissingRequiredInformation, 3, "Non permeated outlet stream is missing")
     End If
-    If edfLen < 0 Or edfDiam < 0 Or edfThick < 0 Or edfk < 0 Or edfNtubes < 0 Or edfAperm < 0 Then
+    If edfLen < 0 Or edfDiam < 0 Or edfThick < 0 Or edfk < 0 Or edfNtubes < 0 Or edfAperm < 0 Or edfNpoints < 1 Then
         Call Status.AddStatusCondition(slMissingRequiredInformation, 4, "Physical parameters missing or incorrect")
     End If
     If IsForgetting Then Exit Sub
@@ -326,7 +326,7 @@ Private Sub ExtensionObject_VariableChanged(ByVal Variable As HYSYS.InternalVari
         Case "k"
             Set edfk = myContainer.FindVariable("k").Variable
         Case "NumberOfPoints"
-            'Set edfNpoints = myContainer.FindVariable("NumberOfPoints").Variable
+            Set edfNpoints = myContainer.FindVariable("NumberOfPoints").Variable
             'GrafL = LengthVector(edfLen, edfNpoints)
 
     End Select
@@ -340,8 +340,8 @@ Private Function ExtensionObject_VariableChanging(ByVal Variable As HYSYS.Intern
     Select Case Variable.Tag
 
         Case "NumberOfPoints"
-            If Variable.NewRealValue < 2 Or Variable.NewRealValue > 100 Then
-                Call MsgBox("Entered Value is out of range, must be between 2 and 100.")
+            If Variable.NewRealValue < 1 Or Variable.NewRealValue > 1000 Then
+                Call MsgBox("Entered Value is out of range, must be between 1 and 1000.")
                 ExtensionObject_VariableChanging = False
                 Exit Function
             End If
@@ -444,31 +444,37 @@ End Sub
 '                         Permeation Functions                              '
 '***************************************************************************'
 Private Function Permeation()
-' Calculate vector of permeated species in default HYSYS magnitude: "kmol/s"
-'   Ffeed:          Double(nComp)   inlet molar flow (per component)
-'   Fperm:          Double(nComp)   permeated molar flow in one cell (per component)
-'   FpermTotal:     Double(nComp)   aggregates molar flow permeated for each cell
-'                                   (per component)
-'   Fcell:          Double(nComp)   similar to "Ffeed" but for each cell calculated from
-'                                   previous cell
-'   FpermCells:     Double(Npoints) collect total permeation in each cell for plotting purposes
-'   FpermAtom:      Double(3)       Output of the diffusion part of code (H, D, T mole flows)
-'   FpermMolec:      Double(nComp)   Output of the function. Permeated flow (per component)
-'   PfeedPermAtom:  Double(3)       Partial pressure of a specific atom contributed by
-'                                   various molecules for the diffusion
-'   X:              Double(3)       Fraction variable to take into account contribution of
-'                                   each atom to the inlet permeation pressure
-  On Error GoTo errorHandler
-  
+    ' Calculate vector of permeated species in default HYSYS magnitude: "kmol/s"
+    '   FpermMolec:     Double(nComp)   OUTPUT of the function. Permeated flow (per component)
+    '   Ffeed:          Double(nComp)   inlet molar flow (per component)
+    '   Fperm:          Double(nComp)   permeated molar flow in one cell (per component)
+    '   FpermTotal:     Double(nComp)   aggregates molar flow permeated for each cell
+    '                                   (per component)
+    '   Fcell:          Double(nComp)   similar to "Ffeed" but for each cell calculated from
+    '                                   previous cell
+    '   FpermCells:     Double(Npoints) collect total permeation in each cell for plotting
+    '                                   purposes. TODO
+    '   CellFpermAtom:  Double(3)       Cell output of the diffusion part of code (H, D, T mole
+    '                                   flows)
+    '   CellFpermMolec  Double(nComp)   Cell permeate component molar flow
+    '   CellFfeedMolec: Double(nComp)   Cell retentate flows, and, at the same time, next cell
+    '                                   feed component molar flow
+    '   PfeedPermAtom:  Double(3)       Partial pressure of a specific atom contributed by
+    '                                   various molecules for the diffusion
+    '   X:              Double(3)       Fraction variable to take into account contribution of
+    '                                   each atom to the inlet permeation pressure
+    On Error GoTo errorHandler
     ' Step 1 - Declarations
     Dim Fperm() As Double, FpermMolec() As Double, Ffeed() As Double, Fcell() As Double
-    Dim FpermAtom() As Double, X() As Double, PfeedPermAtom() As Double
-    Dim Qfeed As Double, TfeedK As Double, PfeedPa As Double
+    Dim CellFpermAtom() As Double, X() As Double, PfeedPermAtom() As Double
+    Dim cellFfeedMolec() As Double, CellFpermMolec() As Double, CellFeedMolFractions() As Double
+    Dim Qfeed As Double, TfeedK As Double, PfeedPa As Double, ApermCell As Double
     Dim PfeedPerm As Double, molFrac As Double
-    'Dim dx As Double, Ravg As Double, ApermCell As Double
-    Dim i As Long, j As Long, iPerm As Long, nCell As Long
+    Dim i As Long, j As Long, iPerm As Long, nCell As Long, iCell As Integer
+    Dim flagPermMismatch As Boolean
     ReDim Fperm(nComp - 1), FpermMolec(nComp - 1), Fcell(nComp - 1)
-    ReDim FpermAtom(nPermAtom - 1), X(nPermAtom - 1), PfeedPermAtom(nPermAtom - 1)
+    ReDim PfeedPermAtom(nPermAtom - 1), X(nPermAtom - 1)
+    ReDim CellFpermMolec(nComp - 1)
 
     ' Step 2 - Initializations
     ' First check to see if feed flow is unsuitable
@@ -477,116 +483,110 @@ Private Function Permeation()
         Permeation = FpermMolec
         Exit Function
     End If
-
-    ' Get EDF parameters into double VB variables
-    ' nCell = edfNpoints.GetValue()
-    ' ReDim FpermCells(nCell - 1)
-
     ' Get inlet stream parameters
     PfeedPa = edfInlet.Pressure.GetValue("N/m2")    ' Pascals to match permeability formula
     TfeedK = edfInlet.Temperature.GetValue("K")     ' K degrees to match permeability formula
     Qfeed = edfInlet.ActualVolumeFlowValue
-    Ffeed = edfInlet.ComponentMolarFlowValue              ' molar flow per component
-
-    '' Geometric calculations
-    'ApermCell = Aperm / nCell                  ' permeation surface per differential cell
-    'Fcell = Ffeed
-
+    Ffeed = edfInlet.ComponentMolarFlowValue         ' molar flow per component
+    ' Cell discretization initializations
+    nCell = edfNpoints.GetValue()
+    ' ReDim FpermCells(nCell - 1) TODO
+    ApermCell = Aperm / nCell                       ' permeation surface per differential cell
     ' Setup Permeabilities - calculate them and write in EDF (read-only)
     Dim P() As Double
     ReDim P(nPermAtom - 1)
-    ' We calculate Input units as (kmol ï¿½ m-1 ï¿½ s -1 ï¿½ Pa-0.5), therefore the division by 1000
+    ' We calculate Input units as (kmol · m-1 · s -1 · Pa-0.5), therefore the division by 1000
     For i = 0 To nPermAtom - 1
         P(i) = A(i) * Math.Exp(E(i) / (R * TfeedK)) / 1000  ' A() comes in mol, not kmol
     Next
-    ' Publish permeabilities in mol ï¿½ ...
+    ' Publish permeabilities in mol · ...
     Call edfPH.SetValue(P(0) * 1000)
     Call edfPD.SetValue(P(1) * 1000)
     Call edfPT.SetValue(P(2) * 1000)
 
-    ' LOOPS: use "i" for atoms (H, D, T) and "j" for molecules (H2, HD, HT, D2, DT, T2)
-    ' Get total inlet pressure of permeating species ONLY. Apply Dalton's law
-    PfeedPerm = 0  ' p1 in thesis
-    For j = 0 To nPerm - 1
-        iPerm = permIndices(j)
-        PfeedPerm = PfeedPerm + PfeedPa * edfInlet.ComponentMolarFractionValue(iPerm)
-    Next
-    If PfeedPerm = 0 Then
-        ' No permeating species in, exit permeation
-        Permeation = FpermMolec
-        Exit Function
-    End If
-
-    ' Step 3 - Calculate atomic diffusion flows
-    For i = 0 To nPermAtom - 1
-        ' Loop through nPerm (should be 6) to get contribution to partial pressure of atom "i"
-        PfeedPermAtom(i) = 0
+    ' Cell LOOP - initialize
+    CellFeedMolFractions = edfInlet.ComponentMolarFractionValue
+    cellFfeedMolec = edfInlet.ComponentMolarFlowValue
+    For iCell = 0 To nCell - 1
+        ' Step 3 - Calculate permeating pressure
+        ' LOOPS: use "i" for atoms (H, D, T) and "j" for molecules (H2, HD, HT, D2, DT, T2)
+        ' Get total inlet pressure of permeating species ONLY. Apply Dalton's law
+        PfeedPerm = 0  ' p1 in thesis
         For j = 0 To nPerm - 1
-            molFrac = edfInlet.ComponentMolarFractionValue(permIndices(j))
-            ' permCoeffs is 1 or 0.5 depending on molecule being homonuclear or heteronuclear
-            PfeedPermAtom(i) = PfeedPermAtom(i) + permCoeffs(i)(j) * PfeedPa * molFrac
+            iPerm = permIndices(j)
+            PfeedPerm = PfeedPerm + PfeedPa * CellFeedMolFractions(iPerm)
         Next
-        X(i) = PfeedPermAtom(i) / PfeedPerm
-        ' PERMEATION FORMULA: F = P(i) * A / t * (X(i) * sqrt(p_in) - Y(i) * sqrt(p_out))
-        ' Assume negligible output pressure
-        FpermAtom(i) = P(i) * Aperm / thick * (X(i) * Sqr(PfeedPerm))
+        If PfeedPerm = 0 Then
+            ' No permeating species in, exit permeation
+            Permeation = FpermMolec
+            Exit Function
+        End If
+
+        ' Step 4 - Calculate atomic diffusion flows
+        ReDim CellFpermAtom(nPermAtom - 1)
+        For i = 0 To nPermAtom - 1
+            ' Loop through nPerm (should be 6) to get contribution to partial pressure of atom "i"
+            PfeedPermAtom(i) = 0
+            For j = 0 To nPerm - 1
+                molFrac = CellFeedMolFractions(permIndices(j))
+                ' permCoeffs is 1 or 0.5 depending on molecule being homonuclear or heteronuclear
+                PfeedPermAtom(i) = PfeedPermAtom(i) + permCoeffs(i)(j) * PfeedPa * molFrac
+            Next
+            X(i) = PfeedPermAtom(i) / PfeedPerm
+            ' PERMEATION FORMULA: F = P(i) * A / t * (X(i) * sqrt(p_in) - Y(i) * sqrt(p_out))
+            ' Assume negligible output pressure
+            CellFpermAtom(i) = P(i) * ApermCell / thick * (X(i) * Sqr(PfeedPerm))
+        Next
+
+        ' Step 5 - Distribute molecular flow depending on the calculated atomic diffusion flow
+        ' Check if we have all permeating species available in the inlet in `isFeedComplete`
+        ReDim CellFpermMolec(nComp - 1)
+        Dim isFeedComplete As Boolean
+        isFeedComplete = True
+        For i = 0 To nPerm - 1
+            iPerm = permIndices(i)
+            If cellFfeedMolec(iPerm) = 0 Then isFeedComplete = False
+        Next
+        ' Select heuristic function to assign molecular distribution
+        If isFeedComplete Then
+            ' OPTION 1: We have all molecules in the feed and there is enough of all of them
+            Call PermeateHeuristic1(CellFpermMolec, cellFfeedMolec, CellFpermAtom)
+        Else
+            ' OPTION 2: Some molecules in the feed are missing
+            Call PermeateHeuristic2(CellFpermMolec, cellFfeedMolec, CellFpermAtom)
+        End If
+
+        ' Step 6 - Last checks
+        ' Check that the total permeated flow is the same from both Atom and Molecular sides
+        ' Use the rounded relative error to measure the closeness of both sums
+        If Not flagPermMismatch Then
+            Dim SumMolec As Double
+            Dim SumAtom As Double
+            SumMolec = Sum(CellFpermMolec)
+            SumAtom = Sum(CellFpermAtom)
+            Dim RelError As Double
+            RelError = Math.Abs((SumAtom - SumMolec) / SumAtom)
+            If Math.Round(RelError, 10) > 0 Then  ' 10 is an arbitrary number of decimals
+                flagPermMismatch = True
+            End If
+        End If
+
+        ' Step 7 - Calculate cell retentate and accumulate permeation flow
+        FpermMolec = SumArrays(FpermMolec, CellFpermMolec)
+        ' Current cell Retentate will be the next cell Feed
+        cellFfeedMolec = Subtract(cellFfeedMolec, CellFpermMolec)
+        ' Calculate molar fractions off this new retentate
+        CellFeedMolFractions = CalcMolFractions(cellFfeedMolec)
     Next
 
-    ' Step 4 - Distribute molecular flow depending on the calculated atomic diffusion flow
-    ' Check if we have all permeating species available in the inlet in `isFeedComplete`
-    Dim isFeedComplete As Boolean
-    isFeedComplete = True
-    For i = 0 To nPerm - 1
-        iPerm = permIndices(i)
-        If Ffeed(iPerm) = 0 Then isFeedComplete = False
-    Next
-    ' Select heuristic function to assign molecular distribution
-    If isFeedComplete Then
-        ' OPTION 1: We have all molecules in the feed and there is enough of all of them
-        Call PermeateHeuristic1(FpermMolec, Ffeed, FpermAtom)
-    Else
-        ' OPTION 2: Some molecules in the feed are missing
-        Call PermeateHeuristic2(FpermMolec, Ffeed, FpermAtom)
-    End If
-
-    ' Step 5 - Last checks
-    ' Check that the total permeated flow is the same from both Atom and Molecular sides
-    ' Use the rounded relative error to measure the closeness of both sums
-    Dim SumMolec As Double
-    Dim SumAtom As Double
-    SumMolec = Sum(FpermMolec)
-    SumAtom = Sum(FpermAtom)
-    Dim RelError As Double
-    RelError = Math.Abs((SumAtom - SumMolec) / SumAtom)
-    If Math.Round(RelError, 10) > 0 Then  ' 10 is an arbitrary number of decimals
+    ' Step 8 - Catch Step 6 permeation mismatch flag
+    ' It does not mean there's a malfunction in the extension. It can be due to permeation
+    ' exhaustion or a warning pointing that the heuristics are working at their limits
+    If flagPermMismatch Then
         Call myContainer.Trace(myContainer.Name + ": Permeation function did not match required" _
-            + " atomic permeation (FpermAtom) with the actual output (FpermMolec)", False)
+            + " atomic permeation (CellFpermAtom) with the actual output (CellFpermMolec)" _
+            + " in some cells", False)
     End If
-
-    ' LOOP over cells
-    'For i = 0 To nCell - 1
-    '    ' Calculate concentrations [kgmole/m3]
-    '    CHTsi = Fcell(idxHT) / Qfeed
-    '    CHsi = Fcell(idxH2) / Qfeed
-    '    CTsi = Fcell(idxT2) / Qfeed
-    '    CTso = 0
-    '    CHso = 0
-    '    CHTso = 0
-    '    If CTi = -32767 Then CTi = 0
-    '    If CTo = -32767 Then CTo = 0
-    '    If CHTi = -32767 Then CHTi = 0
-    '    If CHTo = -32767 Then CHTo = 0
-    '    If CHi = -32767 Then CHi = 0
-    '    If CHo = -32767 Then CHo = 0
-    '    ' Permeation calculation [at/s]. Richardson's law: [kmol/s?m2] -> multiply by "ApermCell" -> [kmol/s]
-    '    Fperm(idxT2) = (PT / thick) * ((CHTsi + CTsi) - (CTso + CHTso)) * ApermCell
-    '    Fperm(idxH2) = (PH / thick) * ((CHTsi + CHsi) - (CHso + CHTso)) * ApermCell
-    '    '   Old calc. (pi * L * PH / Log(1 + (thick / (Din / 2))) * ((CHTsi + CHsi) - (CHso + CHTso)))
-    '    ' Molar flow component vector in next cell
-    '    Fcell = vectorSubtractIf(Fcell, Fperm)      ' Special function for dealing with undesired negarive permeate flow
-    '    FpermTotal = vectorSum(Fperm, FpermTotal)   ' Aggregate permeation from previous cells
-    '    FpermCells(i) = sumVectorElements(Fperm)
-    'Next i
 
     Permeation = FpermMolec
     Exit Function
@@ -594,6 +594,16 @@ errorHandler:
     Dim sMsg As String
     sMsg = "Error #" & Err.Number & ": '" & Err.Description & "' from '" & Err.Source & "'"
     Call MsgBox(myContainer.Name + " - Permeation: " + sMsg)
+End Function
+
+Private Function CalcMolFractions(cellFfeedMolec() As Double) As Double()
+    Dim molfracs() As Double, totalflow As Double, i As Integer
+    ReDim molfracs(nComp - 1)
+    totalflow = Sum(cellFfeedMolec)
+    For i = 0 To nComp - 1
+        molfracs(i) = cellFfeedMolec(i) / totalflow
+    Next
+    CalcMolFractions = molfracs
 End Function
 
 Private Sub PermeateHeuristic1(FpermMolec() As Double, Ffeed() As Double, FpermAtom() As Double)
@@ -763,7 +773,7 @@ Private Function CheckExtnRequirements() As Boolean
     End If
     ' Geometric check
     If Not edfLen.IsKnown Or Not edfDiam.IsKnown Or Not edfThick.IsKnown Or Not edfk.IsKnown _
-          Or Not edfAperm.IsKnown Or Not edfNtubes.IsKnown Then
+          Or Not edfAperm.IsKnown Or Not edfNtubes.IsKnown Or Not edfNpoints.IsKnown Then
         CheckExtnRequirements = False
         Exit Function
     End If
@@ -902,7 +912,20 @@ Private Function Sum(myArray() As Double) As Double
         Sum = Sum + myArray(i)
     Next
 End Function
-Private Function Subtract(ByRef A1, ByRef A2) As Double()
+Private Function SumArrays(A1, A2) As Double()
+    ' Sum 1D arrays
+    Dim n As Long, i As Long
+    Dim A() As Double
+    ' Get sizes
+    n = UBound(A1, 1) + 1
+    ReDim A(n - 1)
+    ' Do calculation
+    For i = 0 To n - 1
+        A(i) = A1(i) + A2(i)
+    Next i
+    SumArrays = A
+End Function
+Private Function Subtract(ByRef A1, ByRef A2) As Variant
     ' Subtract 1D arrays
     Dim n As Long, i As Long
     Dim A() As Double
