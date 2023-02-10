@@ -76,9 +76,7 @@ Option Explicit
     '                            Physical Variables                             '
     '***************************************************************************'
     ' Geometry
-    Dim L As Double, thick As Double, Din As Double, Aperm As Double
-    ' Volumes
-    Private Volume As Double, Area As Double
+    Dim totalLen As Double, thick As Double, Aperm As Double
     ' Streams
     Dim fluidList() As fluid
     Dim StreamList() As ProcessStream
@@ -113,21 +111,6 @@ Private Function ExtnUnitOperation_Initialize(ByVal Container As HYSYS.ExtnUnitO
         ' I PREFER TO SEE THE LAST USED VIEW INSTEAD OF THE MAIN ONE
         'IRV = myContainer.FindVariable("Design_enum").Variable
         'IRV.Value = 0
-        '
-        'Set the initial num value: Karlsruhe experiment for WDS and TEP (Welte, 2009)
-        ' I STOPPED DOING THIS SINCE IT MODIFIED PREVIOUS AREAS EVEN THOUGH THEY WERE
-        ' DEFINED, EVERY TIME YOU OPENED THE MODEL
-        'thick = 0.0001              'm
-        'edfThick.SetValue(thick)
-        'Din = 0.0023                'm
-        'edfDiam.SetValue(Din)
-        'edfNtubes.SetValue(183)      '-
-        'edfLen.SetValue(0.9)         'm
-        'L = edfLen.GetValue() * edfNtubes.GetValue()
-        'Dim Ravg As Double
-        'Ravg = ((Din + (Din + 2 * thick)) / 2) / 2
-        'Aperm = L * (2 * pi * Ravg)
-        'edfAperm.SetValue(Aperm)     'm2
     End If
     ' Global variables: first calculation
     nPerm = 6
@@ -136,13 +119,11 @@ Private Function ExtnUnitOperation_Initialize(ByVal Container As HYSYS.ExtnUnitO
     A = Array(0.0000000558, 0.0000000343, 2.63207547169811E-08)
     E = Array(-6304, -6156, -6304)
     permCoeffs = Array(Array(1, 0.5, 0.5, 0, 0, 0), Array(0, 0.5, 0, 1, 0.5, 0), Array(0, 0, 0.5, 0, 0.5, 1))
-    
+    ' Geometry initializations
     thick = edfThick.GetValue()
-    Din = edfDiam.GetValue()
     Aperm = edfAperm.GetValue()
-    Area = pi * (Din ^ 2) / 4
-    L = edfLen.GetValue() * edfNtubes.GetValue()
-    Volume = L * Area
+    totalLen = edfLen.GetValue() * edfNtubes.GetValue()
+    Call CalcAperm
     ' Plotting initializations
     If edfLengthPos Is Nothing Or edfCompT Is Nothing Then
         Dim auxZeros() As Double
@@ -284,53 +265,36 @@ Private Sub ExtensionObject_VariableChanged(ByVal Variable As HYSYS.InternalVari
         '%% Geometry variables
         Case "Length"
             Set edfLen = myContainer.FindVariable("Length").Variable
-            L = edfLen.Value * edfNtubes.Value                    ' total length of tubes
-            ' Recalculation of cross-area and total volume
-            Area = pi * (Din ^ 2) / 4
-            Volume = L * Area
-            GrafL = LengthVector(edfLen.Value, edfNpoints.Value)
-            ' Recalculation of total permeation surface
-            Ravg = ((Din + (Din + 2 * thick)) / 2) / 2      ' auxiliar average radius between Dint and Dext
-            Call edfAperm.SetValue(L * (2 * pi * Ravg))
-            Aperm = edfAperm.Value
+            If edfLen.Value > 0 Then
+                If edfNpoints.Value > 0 Then
+                    GrafL = LengthVector(edfLen.Value, edfNpoints.Value)
+                End If
+                If edfNtubes.Value > 0 Then
+                    totalLen = edfLen.Value * edfNtubes.Value
+                Else
+                    totalLen = -32767
+                End If
+            End If
+            Call CalcAperm
         Case "Diam"
             Set edfDiam = myContainer.FindVariable("Diam").Variable
-            Din = edfDiam.GetValue()
-            ' Recalculation of cross-area and total volume
-            Area = pi * (Din ^ 2) / 4
-            Volume = edfLen.Value * edfNtubes.Value * Area
-            ' Recalculation of total permeation surface
-            Ravg = ((Din + (Din + 2 * thick)) / 2) / 2      ' auxiliar average radius between Dint and Dext
-            Call edfAperm.SetValue(L * (2 * pi * Ravg))
-            Aperm = edfAperm.Value
+            Call CalcAperm
         Case "Thickness"
             Set edfThick = myContainer.FindVariable("Thickness").Variable
             thick = edfThick.GetValue()
-            ' Recalculation of total permeation surface
-            Ravg = ((Din + (Din + 2 * thick)) / 2) / 2      ' auxiliar average radius between Dint and Dext
-            Call edfAperm.SetValue(L * (2 * pi * Ravg))
-            Aperm = edfAperm.Value
+            Call CalcAperm
         Case "Aperm"
             Set edfAperm = myContainer.FindVariable("Aperm").Variable
             Aperm = edfAperm.Value
-            ' Recalculation of total permeation surface
-            Ravg = ((Din + (Din + 2 * thick)) / 2) / 2      ' auxiliar average radius between Dint and Dext
-            L = Aperm / (2 * pi * Ravg)                     ' total length of tubes
-            Call edfLen.SetValue(L / edfNtubes.GetValue())
-            ' Recalculation of cross-area and total volume
-            Area = pi * (Din ^ 2) / 4
-            Volume = L * Area
+            Call CalcLength
         Case "Ntubes"
             Set edfNtubes = myContainer.FindVariable("Ntubes").Variable
-            ' Recalculation of total length (mantaining length/tube (edfLen))
-            L = edfLen.Value * edfNtubes.Value
-            ' Recalculation of total permeation surface (last change affects area)
-            Ravg = ((Din + (Din + 2 * thick)) / 2) / 2      ' auxiliar average radius between Dint and Dext
-            Call edfAperm.SetValue(L * (2 * pi * Ravg))
-            Aperm = edfAperm.Value
-            ' Recalculation of cross-area and total volume
-            Area = pi * (Din ^ 2) / 4
-            Volume = L * Area
+            If edfLen.Value > 0 And edfNtubes.Value > 0 Then
+                totalLen = edfLen.Value * edfNtubes.Value
+            Else
+                totalLen = -32767
+            End If
+            Call CalcAperm
 
         '%% Pressure drop and others
         Case "PressDrop"
@@ -341,13 +305,50 @@ Private Sub ExtensionObject_VariableChanged(ByVal Variable As HYSYS.InternalVari
             Set edfk = myContainer.FindVariable("k").Variable
         Case "NumberOfPoints"
             Set edfNpoints = myContainer.FindVariable("NumberOfPoints").Variable
-            GrafL = LengthVector(edfLen.Value, edfNpoints.Value)
+            If edfLen.Value > 0 And edfNpoints.Value > 0 Then
+                GrafL = LengthVector(edfLen.Value, edfNpoints.Value)
+            End If
 
     End Select
     Exit Sub
 ErrorTrap:
     Call myContainer.Trace(myContainer.Name & ": Error in Variable Changed for variable " & Variable.Tag & ".", False)
     MsgBox ("Variable Changed Error")
+End Sub
+
+Private Sub CalcAperm()
+    ' Re-calculate the effective permeation area when some geometry parameter changes
+    ' using the logarithmic formula (see Ackerman and Koskinas 1972)
+    ' Check non-defined values
+    Dim Rin As Double, Rext As Double, X As Double
+    If edfDiam.Value <= 0 Or edfThick.Value <= 0 Or totalLen <= 0 Then
+        Aperm = -32767
+        Call edfAperm.SetValue(Aperm)
+        Exit Sub
+    End If
+    ' Calc
+    Rin = edfDiam.Value / 2
+    Rext = Rin + edfThick.Value
+    X = Rext - Rin
+    Aperm = (2 * pi * totalLen * X) / Log(Rext / Rin)
+    Call edfAperm.SetValue(Aperm)
+End Sub
+
+Private Sub CalcLength()
+    ' Calc length based on permeation area
+    ' Check non-defined values
+    If edfDiam.Value <= 0 Or edfThick.Value <= 0 Or edfAperm.Value <= 0 Or edfNtubes.Value <= 0 Then
+        totalLen = -32767
+        Call edfLen.SetValue(-32767)
+        Exit Sub
+    End If
+    ' Calc
+    Dim Rext As Double, Rin As Double, X As Double
+    Rin = edfDiam.Value / 2
+    Rext = Rin + edfThick.Value
+    X = Rext - Rin
+    totalLen = edfAperm.Value * Log(Rext / Rin) / (2 * pi * X)
+    Call edfLen.SetValue(totalLen / edfNtubes.Value)
 End Sub
 
 Private Function ExtensionObject_VariableChanging(ByVal Variable As HYSYS.InternalVariableWrapper) As Boolean
@@ -475,7 +476,7 @@ Private Function Permeation()
     ' Step 1 - Declarations
     Dim Fperm() As Double, FpermMolec() As Double, Ffeed() As Double, Fcell() As Double
     Dim CellFpermAtom() As Double, X() As Double, PermMolFrac() As Double, Y() As Double
-    Dim CellFfeedMolec() As Double, CellFpermMolec() As Double, CellFeedMolFractions() As Double
+    Dim cellFfeedMolec() As Double, CellFpermMolec() As Double, CellFeedMolFractions() As Double
     Dim Qfeed As Double, TfeedK As Double, PfeedPa As Double, ApermCell As Double
     Dim PfeedPerm As Double, molFrac As Double, totalPermMolFrac As Double
     Dim i As Long, j As Long, iPerm As Long, nCell As Long, iCell As Integer
@@ -526,7 +527,7 @@ Private Function Permeation()
     Do While (Not flagConv) And (iter < maxIter)
         ' CELL LOOP
         CellFeedMolFractions = edfInlet.ComponentMolarFractionValue
-        CellFfeedMolec = edfInlet.ComponentMolarFlowValue
+        cellFfeedMolec = edfInlet.ComponentMolarFlowValue
         ReDim FpermMolec(nComp - 1)  ' to re-init components to zero
         For iCell = 0 To nCell - 1
             ' Step 3 - Calculate permeating pressure
@@ -588,15 +589,15 @@ Private Function Permeation()
             isFeedComplete = True
             For i = 0 To nPerm - 1
                 iPerm = permIndices(i)
-                If CellFfeedMolec(iPerm) = 0 Then isFeedComplete = False
+                If cellFfeedMolec(iPerm) = 0 Then isFeedComplete = False
             Next
             ' Select heuristic function to assign molecular distribution
             If isFeedComplete Then
                 ' OPTION 1: We have all molecules in the feed and there is enough of all of them
-                Call PermeateHeuristic1(CellFpermMolec, CellFfeedMolec, CellFpermAtom)
+                Call PermeateHeuristic1(CellFpermMolec, cellFfeedMolec, CellFpermAtom)
             Else
                 ' OPTION 2: Some molecules in the feed are missing
-                Call PermeateHeuristic2(CellFpermMolec, CellFfeedMolec, CellFpermAtom)
+                Call PermeateHeuristic2(CellFpermMolec, cellFfeedMolec, CellFpermAtom)
             End If
     
             ' Step 6 - Last checks
@@ -619,9 +620,9 @@ Private Function Permeation()
             FpermMolec = SumArrays(FpermMolec, CellFpermMolec)
             FpermCellsPlot(iCell) = Sum(FpermMolec)
             ' Current cell Retentate will be the next cell Feed
-            CellFfeedMolec = Subtract(CellFfeedMolec, CellFpermMolec)
+            cellFfeedMolec = Subtract(cellFfeedMolec, CellFpermMolec)
             ' Calculate molar fractions off this new retentate
-            CellFeedMolFractions = CalcMolFractions(CellFfeedMolec)
+            CellFeedMolFractions = CalcMolFractions(cellFfeedMolec)
         Next
     
         ' Step 8 - Convergence test
