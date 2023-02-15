@@ -522,8 +522,15 @@ Private Function Permeation()
     Call edfPT.SetValue(P(2) * 1000)
 
     ' ITER LOOP
-    maxIter = 1000
+    If nCell = 1 Then
+        maxIter = 1  ' Avoid iterating with 1 cell due to non-convergence problems found
+    Else
+        maxIter = 15
+    End If
     iter = 0
+    Dim weight As Double, delta_weight As Double
+    weight = 0.5
+    delta_weight = 0.5
     Do While (Not flagConv) And (iter < maxIter)
         ' CELL LOOP
         CellFeedMolFractions = edfInlet.ComponentMolarFractionValue
@@ -609,6 +616,9 @@ Private Function Permeation()
                 If SumAtom <> 0 Then
                     SumMolec = Sum(CellFpermMolec)
                     Dim RelError As Double
+                    If SumAtom = 0 Then
+                        MsgBox "SumAtom error"
+                    End If
                     RelError = Math.Abs((SumAtom - SumMolec) / SumAtom)
                     If Math.Round(RelError, 10) > 0 Then  ' 10 is an arbitrary number of decimals
                         flagPermMismatch = True
@@ -630,12 +640,22 @@ Private Function Permeation()
         SumNew = Sum(FpermMolec)
         SumOld = Sum(FpermMolecOld)
         Dim RelErrorConv As Double
-        RelErrorConv = Math.Abs((SumNew - SumOld) / SumNew)
-        If RelErrorConv < 0.001 Then  ' 0.1 % as Ackerman 1972
-            flagConv = True
+        If SumNew = 0 Then
+            ' Nothing permeates though there are permeation species in the feed
+            ' When this happens we ignore the issue and iterations will exhaust with some small
+            ' permeation that will flow out, but this could be handled more elegantly
+        Else
+            RelErrorConv = Math.Abs((SumNew - SumOld) / SumNew)
+            If RelErrorConv < 0.001 Then  ' 0.1 % as Ackerman 1972
+                flagConv = True
+            End If
         End If
-        ' Make a copy of the output perm flow
-        FpermMolecOld = FpermMolec
+        ' Make a copy of the output perm flow and update weighting
+        Call WeightedSum(FpermMolecOld, FpermMolec, weight)
+        If (iter >= maxIter / 2) And (weight < 0.95) Then
+            delta_weight = delta_weight / 2
+            weight = weight + delta_weight
+        End If
         ' Update iterations
         iter = iter + 1
     Loop
@@ -648,7 +668,10 @@ Private Function Permeation()
             + " atomic permeation (CellFpermAtom) with the actual output (CellFpermMolec)" _
             + " in some cells", False)
     End If
-
+    If (iter >= maxIter) And (nCell > 1) Then
+        Call myContainer.Trace(myContainer.Name + ": Permeation function exhausted max " _
+                               + "iterations without convergence", False)
+    End If
     Permeation = FpermMolec
     Exit Function
 errorHandler:
@@ -661,6 +684,12 @@ Private Function CalcMolFractions(cellFfeedMolec() As Double) As Double()
     Dim molfracs() As Double, totalflow As Double, i As Integer
     ReDim molfracs(nComp - 1)
     totalflow = Sum(cellFfeedMolec)
+    ' Consider case total flow is zero
+    If totalflow = 0 Then
+        molfracs(0) = 1
+        Exit Function
+    End If
+    ' Normal case: calculate molar fractions
     For i = 0 To nComp - 1
         molfracs(i) = cellFfeedMolec(i) / totalflow
     Next
@@ -986,6 +1015,16 @@ Private Function Sum(myArray() As Double) As Double
         Sum = Sum + myArray(i)
     Next
 End Function
+Private Sub WeightedSum(ByRef A1() As Double, A2() As Double, w As Double)
+    ' Do a weighted sum for vectors in an element-wise way with weight 'w'.
+    ' A high value of w means a slower and steadier movement, while a lower one means
+    '  a fastest and riskier approach to the solution.
+    ' Do these operations in place for the A1 ByRef array!
+    Dim i As Integer
+    For i = 0 To UBound(A1, 1)
+        A1(i) = w * A1(i) + (1 - w) * A2(i)
+    Next i
+End Sub
 Private Function SumArrays(A1, A2) As Double()
     ' Sum 1D arrays
     Dim n As Long, i As Long
