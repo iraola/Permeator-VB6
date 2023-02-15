@@ -480,9 +480,10 @@ Private Function Permeation()
     Dim Qfeed As Double, TfeedK As Double, PfeedPa As Double, ApermCell As Double
     Dim PfeedPerm As Double, molFrac As Double, totalPermMolFrac As Double
     Dim i As Long, j As Long, iPerm As Long, nCell As Long, iCell As Integer
-    Dim flagPermMismatch As Boolean, flagConv As Boolean, iter As Integer, maxIter As Integer
+    Dim flagPermMismatch As Boolean, flagConv As Boolean, flagZeroSum As Integer
     Dim Pperm As Double, PermMolFracOut() As Double, permFlow As Double
     Dim FpermMolecOld() As Double, totalFpermMolecOld As Double
+    Dim iter As Integer, maxIter As Integer
     ReDim Fperm(nComp - 1), Fcell(nComp - 1), FpermMolecOld(nComp - 1)
     ReDim PermMolFrac(nPermAtom - 1), X(nPermAtom - 1), Y(nPermAtom - 1)
     ReDim CellFpermMolec(nComp - 1)
@@ -643,7 +644,8 @@ Private Function Permeation()
         If SumNew = 0 Then
             ' Nothing permeates though there are permeation species in the feed
             ' When this happens we ignore the issue and iterations will exhaust with some small
-            ' permeation that will flow out, but this could be handled more elegantly
+            ' permeation that will flow out or none at all
+            flagZeroSum = flagZeroSum + 1
         Else
             RelErrorConv = Math.Abs((SumNew - SumOld) / SumNew)
             If RelErrorConv < 0.001 Then  ' 0.1 % as Ackerman 1972
@@ -655,6 +657,10 @@ Private Function Permeation()
         If (iter >= maxIter / 2) And (weight < 0.95) Then
             delta_weight = delta_weight / 2
             weight = weight + delta_weight
+        End If
+        If flagZeroSum >= 3 Then
+            ' The FpermMolec is already zero: exit loop
+            flagConv = True
         End If
         ' Update iterations
         iter = iter + 1
