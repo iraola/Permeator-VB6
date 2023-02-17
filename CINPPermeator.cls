@@ -611,21 +611,18 @@ Private Function Permeation()
             ' Step 6 - Last checks
             ' Check that the total permeated flow is the same from both Atom and Molecular sides
             ' Use the rounded relative error to measure the closeness of both sums
-            If Not flagPermMismatch Then
-                Dim SumMolec As Double, SumAtom As Double
-                SumAtom = Sum(CellFpermAtom)
-                If SumAtom <> 0 Then
-                    SumMolec = Sum(CellFpermMolec)
-                    Dim RelError As Double
-                    If SumAtom = 0 Then
-                        MsgBox "SumAtom error"
-                    End If
-                    RelError = Math.Abs((SumAtom - SumMolec) / SumAtom)
-                    If Math.Round(RelError, 10) > 0 Then  ' 10 is an arbitrary number of decimals
-                        flagPermMismatch = True
-                    End If
-                End If
-            End If
+            'If Not flagPermMismatch Then
+            '    Dim SumMolec As Double, SumAtom As Double
+            '    SumAtom = Sum(CellFpermAtom)
+            '    If SumAtom <> 0 Then
+            '        SumMolec = Sum(CellFpermMolec)
+            '        Dim RelError As Double
+            '        RelError = Math.Abs((SumAtom - SumMolec) / SumAtom)
+            '        If Math.Round(RelError, 10) > 0 Then  ' 10 is an arbitrary number of decimals
+            '            flagPermMismatch = True
+            '        End If
+            '    End If
+            'End If
     
             ' Step 7 - Calculate cell retentate and accumulate permeation flow
             FpermMolec = SumArrays(FpermMolec, CellFpermMolec)
@@ -667,17 +664,18 @@ Private Function Permeation()
     Loop
 
     ' Step 9 - Catch Step 6 permeation mismatch flag
+    ' FIX - Remove traces to avoid to frequent and annoying warnings
     ' It does not mean there's a malfunction in the extension. It can be due to permeation
     ' exhaustion or a warning pointing that the heuristics are working at their limits
-    If flagPermMismatch Then
-        Call myContainer.Trace(myContainer.Name + ": Permeation function did not match required" _
-            + " atomic permeation (CellFpermAtom) with the actual output (CellFpermMolec)" _
-            + " in some cells", False)
-    End If
-    If (iter >= maxIter) And (nCell > 1) Then
-        Call myContainer.Trace(myContainer.Name + ": Permeation function exhausted max " _
-                               + "iterations without convergence", False)
-    End If
+    'If flagPermMismatch Then
+    '    Call myContainer.Trace(myContainer.Name + ": Permeation function did not match required" _
+    '        + " atomic permeation (CellFpermAtom) with the actual output (CellFpermMolec)" _
+    '        + " in some cells", False)
+    'End If
+    'If (iter >= maxIter) And (nCell > 1) Then
+    '    Call myContainer.Trace(myContainer.Name + ": Permeation function exhausted max " _
+    '                           + "iterations without convergence", False)
+    'End If
     Permeation = FpermMolec
     Exit Function
 errorHandler:
