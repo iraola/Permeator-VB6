@@ -637,6 +637,12 @@ Private Function Permeation()
         Dim SumNew As Double, SumOld As Double
         SumNew = Sum(FpermMolec)
         SumOld = Sum(FpermMolecOld)
+        ''WATCH ONLY*********************
+        'Dim FpermMolecWatch As Variant, FpermMolecOldWatch As Variant, InletWatch As Variant
+        'FpermMolecWatch = ScalarMult(FpermMolec, 3600000)
+        'FpermMolecOldWatch = ScalarMult(FpermMolecOld, 3600000)
+        'InletWatch = ScalarMult(edfInlet.ComponentMolarFlowValue, 3600000)
+        ''''*********************
         Dim RelErrorConv As Double
         If SumNew = 0 Then
             ' Nothing permeates though there are permeation species in the feed
@@ -655,10 +661,10 @@ Private Function Permeation()
             delta_weight = delta_weight / 2
             weight = weight + delta_weight
         End If
-        If flagZeroSum >= 3 Then
-            ' The FpermMolec is already zero: exit loop
-            flagConv = True
-        End If
+        'If flagZeroSum >= 3 Then
+        '    ' The FpermMolec is already zero: exit loop
+        '    flagConv = True
+        'End If
         ' Update iterations
         iter = iter + 1
     Loop
@@ -682,6 +688,15 @@ errorHandler:
     Dim sMsg As String
     sMsg = "Error #" & Err.Number & ": '" & Err.Description & "' from '" & Err.Source & "'"
     Call MsgBox(myContainer.Name + " - Permeation: " + sMsg)
+End Function
+
+Private Function ScalarMult(vector, scalar) As Double()
+    Dim i As Integer, out() As Double
+    ReDim out(UBound(vector))
+    For i = 0 To UBound(vector)
+        out(i) = vector(i) * scalar
+    Next
+    ScalarMult = out
 End Function
 
 Private Function CalcMolFractions(cellFfeedMolec() As Double) As Double()
