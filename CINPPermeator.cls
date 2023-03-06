@@ -706,6 +706,7 @@ Private Function CalcMolFractions(cellFfeedMolec() As Double) As Double()
     ' Consider case total flow is zero
     If totalflow = 0 Then
         molfracs(0) = 1
+        CalcMolFractions = molfracs
         Exit Function
     End If
     ' Normal case: calculate molar fractions
